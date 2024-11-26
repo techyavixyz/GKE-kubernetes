@@ -1,0 +1,164 @@
+1, install nginx controller on Kuberenetes 
+
+
+It will install the controller in the ingress-nginx namespace, creating that namespace
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.3.0/deploy/static/provider/cloud/deploy.yaml
+
+
+2. to verify nginx-controller
+
+kubectl get pods --namespace ingress-nginx
+
+
+3. Check the NGINX Ingress controller has been assigned a public IP address
+
+
+kubectl get service ingress-nginx-controller --namespace=ingress-nginx
+
+The command below will let you check if the NGINX Ingress controller has a public IP address already assigned to it.
+
+
+5. Set up a basic web app for testing
+First, we need to set up a DNS record pointing to the External IP address we discovered in the previous step. Once that is set, run the following command to set up a demo (replace the [DNS_NAME] with your record, e.g. www.jackwesleyroper.io).
+
+Note that you must set up a DNS record, this step will not work with an IP address. This command comes from the NGINX documentation, we will look at declarative approaches later in this article.
+
+kubectl create ingress demo --class=nginx --rule [DNS_NAME]/=demo:80
+6. Browse to the web address
+You will see ‘It works!’ displayed, confirming that the Ingress controller is correctly routing traffic to the demo app.
+
+7. Set up two more web apps
+Now we will set up two more web apps, and route traffic between them using NGINX.
+
+We will create two YAML files using the demo apps from the official Azure documentation.
+
+aks-helloworld-one.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aks-helloworld-one  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aks-helloworld-one
+  template:
+    metadata:
+      labels:
+        app: aks-helloworld-one
+    spec:
+      containers:
+      - name: aks-helloworld-one
+        image: mcr.microsoft.com/azuredocs/aks-helloworld:v1
+        ports:
+        - containerPort: 80
+        env:
+        - name: TITLE
+          value: "Welcome to Azure Kubernetes Service (AKS)"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aks-helloworld-one  
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+  selector:
+    app: aks-helloworld-one
+aks-helloworld-two.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aks-helloworld-two  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aks-helloworld-two
+  template:
+    metadata:
+      labels:
+        app: aks-helloworld-two
+    spec:
+      containers:
+      - name: aks-helloworld-two
+        image: mcr.microsoft.com/azuredocs/aks-helloworld:v1
+        ports:
+        - containerPort: 80
+        env:
+        - name: TITLE
+          value: "AKS Ingress Demo"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aks-helloworld-two  
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+  selector:
+    app: aks-helloworld-two
+Apply the two configuration files to setup the apps:
+
+kubectl apply -f aks-helloworld-one.yaml --namespace ingress-nginx
+kubectl apply -f aks-helloworld-two.yaml --namespace ingress-nginx
+kubernetes ingress - configuration file one
+kubernetes ingress - configuration file two
+Check the new pods are running (you should see two aks-helloworld pods running):
+
+kubectl get pods --namespace ingress-nginx
+kubernetes ingress - kubectl get pods
+8. Setup the Ingress to route traffic between the two apps
+We will set up path-based routing to direct traffic to the appropriate web apps based on the URL the user enters. EXTERNAL_IP/hello-world-one is routed to the service named aks-helloworld-one. Traffic to EXTERNAL_IP/hello-world-two is routed to the aks-helloworld-two service. Where the path is not specified by the user (EXTERNAL_IP/), the traffic is routed to aks-helloworld-one.
+
+Create a file named hello-world-ingress.yaml.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-world-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /hello-world-one(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: aks-helloworld-one
+            port:
+              number: 80
+      - path: /hello-world-two(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: aks-helloworld-two
+            port:
+              number: 80
+      - path: /(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: aks-helloworld-one
+            port:
+              number: 80
+Create the ingress
+
+kubectl apply -f hello-world-ingress.yaml --namespace ingress-nginx
+kubernetes ingress - ingress
+9. Browse to the EXTERNAL_IP/hello-world-one
+When you open the EXTERNAL_IP/hello-world-one you should see the screen below:
+
+kubernetes ingress - welcome one
+And EXTERNAL_IP/hello-world-two:
+
